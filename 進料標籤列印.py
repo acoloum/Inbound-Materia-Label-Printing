@@ -166,6 +166,7 @@ def import_excel_to_db(filepath):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM MYTABLE")
+    cur.execute("DELETE FROM PRINT_LOG")  # 清除舊列印記錄，避免 SN 重複誤判已印
 
     sn = 1
     for row in ws.iter_rows(min_row=2, values_only=True):
