@@ -127,7 +127,7 @@ def get_printed_sns() -> set:
 
 
 def log_print(sn: int, printer: str, label_nums: list):
-    """寫入列印記錄"""
+    """寫入列印記錄，每筆 SN 最多保留最近 10 筆"""
     conn = get_db()
     try:
         conn.execute(
@@ -135,6 +135,12 @@ def log_print(sn: int, printer: str, label_nums: list):
             (sn, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
              printer, json.dumps(label_nums))
         )
+        conn.execute("""
+            DELETE FROM PRINT_LOG
+            WHERE SN=? AND ID NOT IN (
+                SELECT ID FROM PRINT_LOG WHERE SN=? ORDER BY ID DESC LIMIT 10
+            )
+        """, (sn, sn))
         conn.commit()
     except Exception:
         pass
@@ -202,6 +208,7 @@ def import_excel_to_db(filepath):
         sn += 1
 
     conn.commit()
+    conn.execute("VACUUM")
     conn.close()
     return sn - 1
 
