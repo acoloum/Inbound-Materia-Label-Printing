@@ -1,0 +1,15 @@
+# 資料庫與設定（各電腦獨立，不追蹤）
+FastReport_sqllite.db
+settings.json
+
+# Excel 資料檔
+*.xlsx
+*.xls
+
+# Python 快取
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude 工作區
+.claude/
