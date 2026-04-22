@@ -445,7 +445,7 @@ class App(tk.Tk):
         frame = ttk.Frame(self)
         frame.pack(fill="both", expand=True, padx=6, pady=4)
 
-        cols = ("chk", "已印") + tuple(c[0] for c in COLUMNS) + ("每包數量",)
+        cols = ("chk", "已印") + tuple(c[0] for c in COLUMNS)
         self._tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="extended")
 
         self._tree.heading("chk", text="✓")
@@ -457,8 +457,6 @@ class App(tk.Tk):
         for name, w in COLUMNS:
             self._tree.heading(name, text=name)
             self._tree.column(name, width=w, anchor="center")
-        self._tree.heading("每包數量", text="每包數量")
-        self._tree.column("每包數量", width=70, anchor="center")
 
         # 已印標記樣式：綠色背景
         self._tree.tag_configure("printed", background="#d6f0d6")
@@ -507,7 +505,6 @@ class App(tk.Tk):
                 r["序號"] or "", r["供應商名稱"] or "", r["訂單編號"] or "",
                 r["材質"] or "", r["尺寸"] or "", r["批號"] or "", r["特殊"] or "",
                 r["長度"] or "", r["數量"] or "", r["製造編號/爐號"] or "", r["進貨日期"] or "",
-                pkg,
             )
             tags = ("printed",) if is_printed else ()
             self._tree.insert("", "end", iid=str(sn), values=vals, tags=tags)
