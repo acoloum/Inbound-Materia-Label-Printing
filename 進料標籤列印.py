@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 必榮 進料標籤列印系統
-跨電腦通用版本 - 不需要授權碼，任何 Windows 電腦皆可執行
+Linux（Zorin OS / Ubuntu）版本 — 使用 CUPS 列印
 """
 
 import tkinter as tk
@@ -10,10 +10,8 @@ from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import os
 import json
-import win32print
-import win32ui
-import win32con
-import win32gui
+import tempfile
+import cups
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
 import openpyxl
@@ -33,8 +31,23 @@ LABEL_W_PX  = int(LABEL_W_MM / 25.4 * PRINT_DPI)
 LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
 MARGIN_PX   = int(MARGIN_MM   / 25.4 * PRINT_DPI)
 
-FONT_PATH      = "C:/Windows/Fonts/msjh.ttc"
-FONT_BOLD_PATH = "C:/Windows/Fonts/msjhbd.ttc"
+def _find_cjk_font(bold=False):
+    """在常見 Linux 路徑尋找 Noto Sans CJK 字型"""
+    weight = "Bold" if bold else "Regular"
+    candidates = [
+        f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
+        f"/usr/share/fonts/noto-cjk/NotoSansCJK-{weight}.ttc",
+        f"/usr/share/fonts/truetype/noto/NotoSansCJK-{weight}.ttc",
+        f"/usr/share/fonts/opentype/noto/NotoSansCJKtc-{weight}.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # 退而求其次
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return ""
+
+FONT_PATH      = _find_cjk_font(bold=False)
+FONT_BOLD_PATH = _find_cjk_font(bold=True)
 
 COLUMNS = [
     ("序號", 70), ("供應商名稱", 80), ("訂單編號", 90),
@@ -335,50 +348,25 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     return img
 
 
-# ── Windows 列印 ──────────────────────────────────────────────────────────────
+# ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
 
 def print_label_simple(printer_name, pil_image):
-    """強制以 LABEL_W_MM×LABEL_H_MM 為單張紙尺寸列印"""
-    DM_ORIENTATION = 0x00000001
-    DM_PAPERSIZE   = 0x00000002
-    DM_PAPERLENGTH = 0x00000004
-    DM_PAPERWIDTH  = 0x00000008
-    DMPAPER_USER   = 256
-
-    hprinter = win32print.OpenPrinter(printer_name)
+    """透過 CUPS 以自訂紙張尺寸列印一張標籤"""
+    tmp_path = None
     try:
-        props   = win32print.GetPrinter(hprinter, 2)
-        devmode = props["pDevMode"]
-        devmode.PaperSize   = DMPAPER_USER
-        devmode.PaperWidth  = int(round(LABEL_W_MM * 10))
-        devmode.PaperLength = int(round(LABEL_H_MM * 10))
-        devmode.Orientation = 1
-        devmode.Fields = (devmode.Fields
-                          | DM_PAPERSIZE | DM_PAPERWIDTH
-                          | DM_PAPERLENGTH | DM_ORIENTATION)
-        hdc_int = win32gui.CreateDC("WINSPOOL", printer_name, devmode)
-        hdc = win32ui.CreateDCFromHandle(hdc_int)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+        pil_image.convert("RGB").save(tmp_path, dpi=(PRINT_DPI, PRINT_DPI))
+        conn = cups.Connection()
+        options = {
+            "media": f"Custom.{LABEL_W_MM:.2f}x{LABEL_H_MM:.2f}mm",
+            "fit-to-page": "true",
+            "orientation-requested": "3",
+        }
+        conn.printFile(printer_name, tmp_path, "進料標籤", options)
     finally:
-        win32print.ClosePrinter(hprinter)
-
-    dpi_x  = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
-    dpi_y  = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
-    page_w = hdc.GetDeviceCaps(win32con.HORZRES)
-    page_h = hdc.GetDeviceCaps(win32con.VERTRES)
-    px_w = int(LABEL_W_MM / 25.4 * dpi_x)
-    px_h = int(LABEL_H_MM / 25.4 * dpi_y)
-    if page_w and page_h:
-        px_w = min(px_w, page_w)
-        px_h = min(px_h, page_h)
-
-    img_resized = pil_image.resize((px_w, px_h), Image.LANCZOS).convert("RGB")
-    hdc.StartDoc("進料標籤")
-    hdc.StartPage()
-    from PIL.ImageWin import Dib
-    Dib(img_resized).draw(hdc.GetHandleOutput(), (0, 0, px_w, px_h))
-    hdc.EndPage()
-    hdc.EndDoc()
-    hdc.DeleteDC()
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ── 主視窗 ────────────────────────────────────────────────────────────────────
@@ -481,10 +469,14 @@ class App(tk.Tk):
     # ── 輔助方法 ──────────────────────────────────────────────────────────────
 
     def _refresh_printers(self):
-        printers = [p[2] for p in win32print.EnumPrinters(
-            win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+        try:
+            conn     = cups.Connection()
+            printers = list(conn.getPrinters().keys())
+            default  = conn.getDefault() or ""
+        except Exception:
+            printers = []
+            default  = ""
         self._printer_cb["values"] = printers
-        default = win32print.GetDefaultPrinter()
         if default in printers:
             self._printer_var.set(default)
         elif printers:
