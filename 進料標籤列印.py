@@ -362,20 +362,39 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
 
 # ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
 
+_CUPS_OPTIONS = {
+    "media": f"Custom.{LABEL_W_MM:.2f}x{LABEL_H_MM:.2f}mm",
+    "fit-to-page": "true",
+    "orientation-requested": "3",
+}
+
+
 def print_label_simple(printer_name, pil_image):
-    """透過 CUPS 以自訂紙張尺寸列印一張標籤"""
+    """列印單張標籤（預覽用或單張列印）"""
+    print_labels_batch(printer_name, [pil_image], title="進料標籤")
+
+
+def print_labels_batch(printer_name, pil_images, title="進料標籤批次"):
+    """
+    將多張標籤合併為一個 CUPS 工作送印，避免每張獨立 Job 造成延遲。
+    pil_images: list of PIL.Image
+    """
+    if not pil_images:
+        return
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             tmp_path = f.name
-        pil_image.convert("RGB").save(tmp_path, dpi=(PRINT_DPI, PRINT_DPI))
+        rgb_imgs = [img.convert("RGB") for img in pil_images]
+        head, rest = rgb_imgs[0], rgb_imgs[1:]
+        head.save(
+            tmp_path, "PDF",
+            resolution=PRINT_DPI,
+            save_all=True,
+            append_images=rest,
+        )
         conn = cups.Connection()
-        options = {
-            "media": f"Custom.{LABEL_W_MM:.2f}x{LABEL_H_MM:.2f}mm",
-            "fit-to-page": "true",
-            "orientation-requested": "3",
-        }
-        conn.printFile(printer_name, tmp_path, "進料標籤", options)
+        conn.printFile(printer_name, tmp_path, title, _CUPS_OPTIONS)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -797,6 +816,7 @@ class PrintJobDialog(tk.Toplevel):
         self._success  = 0
         self._cancelled = False
         self._printed_log: dict[int, list] = {}  # sn -> [label_nos]
+        self._images: list = []  # 批次累積的 PIL 圖
 
         total = len(jobs)
         w, h = 460, 200
@@ -827,30 +847,48 @@ class PrintJobDialog(tk.Toplevel):
         self.after(80, self._step)
 
     def _step(self):
+        """先批次產生所有標籤圖（顯示進度），再一次送 CUPS 列印"""
         if self._cancelled or self._idx >= len(self._jobs):
-            self._finish()
+            self._send_to_printer()
             return
 
         rec, n, total_qty, sn = self._jobs[self._idx]
         sup = rec.get("供應商名稱", "")
         self._lbl_info.config(
-            text=f"列印第 {self._idx+1} 張  供應商：{sup}  張數：{n}/{total_qty}")
+            text=f"產生第 {self._idx+1} 張  供應商：{sup}  張數：{n}/{total_qty}")
         self.update_idletasks()
 
         try:
             img = make_label_image(rec, n, total_qty)
-            print_label_simple(self._printer, img)
-            self._success += 1
-            # 記錄此 SN 的已印張號
+            self._images.append(img)
             self._printed_log.setdefault(sn, []).append(n)
+            self._success += 1
         except Exception as e:
-            messagebox.showerror("列印錯誤",
+            messagebox.showerror("產生錯誤",
                 f"第 {n} 張（{sup}）失敗：{e}", parent=self)
 
         self._idx += 1
         self._bar["value"] = self._idx
         self._lbl_count.config(text=f"{self._idx} / {len(self._jobs)}")
-        self.after(10, self._step)
+        self.after(1, self._step)
+
+    def _send_to_printer(self):
+        """將累積的所有標籤合併為單一 CUPS 工作送印"""
+        if self._cancelled or not self._images:
+            self._finish()
+            return
+
+        self._lbl_info.config(text=f"送至印表機中（{len(self._images)} 張）...")
+        self._btn_cancel.config(state="disabled")
+        self.update_idletasks()
+
+        try:
+            print_labels_batch(self._printer, self._images)
+        except Exception as e:
+            messagebox.showerror("列印錯誤", str(e), parent=self)
+            self._success = 0
+
+        self._finish()
 
     def _cancel(self):
         self._cancelled = True
