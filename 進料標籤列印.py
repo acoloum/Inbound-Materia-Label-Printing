@@ -32,14 +32,26 @@ LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
 MARGIN_PX   = int(MARGIN_MM   / 25.4 * PRINT_DPI)
 
 def _find_cjk_font(bold=False):
-    """在常見 Linux 路徑尋找 Noto Sans CJK 字型"""
-    weight = "Bold" if bold else "Regular"
+    """用 fc-match 動態查詢 CJK 字型路徑，找不到才用靜態候補"""
+    import subprocess
+    weight = ":weight=bold" if bold else ""
+    try:
+        result = subprocess.run(
+            ["fc-match", "--format=%{file}", f"NotoSansCJK{weight}"],
+            capture_output=True, text=True, timeout=3
+        )
+        path = result.stdout.strip()
+        if path and os.path.exists(path):
+            return path
+    except Exception:
+        pass
+    # 靜態候補路徑
+    w = "Bold" if bold else "Regular"
     candidates = [
-        f"/usr/share/fonts/opentype/noto/NotoSansCJK-{weight}.ttc",
-        f"/usr/share/fonts/noto-cjk/NotoSansCJK-{weight}.ttc",
-        f"/usr/share/fonts/truetype/noto/NotoSansCJK-{weight}.ttc",
-        f"/usr/share/fonts/opentype/noto/NotoSansCJKtc-{weight}.otf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # 退而求其次
+        f"/usr/share/fonts/opentype/noto/NotoSansCJK-{w}.ttc",
+        f"/usr/share/fonts/noto-cjk/NotoSansCJK-{w}.ttc",
+        f"/usr/share/fonts/truetype/noto/NotoSansCJK-{w}.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     ]
     for p in candidates:
         if os.path.exists(p):
