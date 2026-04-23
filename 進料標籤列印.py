@@ -92,7 +92,7 @@ def init_db():
             尺寸 TEXT, 批號 TEXT, 特殊 TEXT, 長度 TEXT,
             數量 INT, 重量 TEXT, 不良支數 TEXT, 樣品量 TEXT,
             檢驗尺寸 TEXT, 檢驗外觀 TEXT, 檢驗材質 TEXT, 判定 TEXT,
-            製造編號爐號 TEXT, 進貨日期 TEXT, 備註 TEXT,
+            "製造編號/爐號" TEXT, 進貨日期 TEXT, 備註 TEXT,
             PKGQTY INT, SNN INT
         )
     """)
