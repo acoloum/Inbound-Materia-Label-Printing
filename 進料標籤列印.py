@@ -266,16 +266,17 @@ def _draw_cell(draw, x1, y1, x2, y2, text, font, h_align="center", pad=6):
 
 
 def make_label_image(record, pkg_no=1, pkg_total=1):
-    """產生一張標籤的 PIL Image，四周保留 MARGIN_PX 留白"""
-    W, H = LABEL_W_PX, LABEL_H_PX
-    M = MARGIN_PX
+    """產生一張標籤的 PIL Image，以 2 倍超採樣繪製後縮回原尺寸以改善字體鋸齒"""
+    S = 2  # 超採樣倍率
+    W, H = LABEL_W_PX * S, LABEL_H_PX * S
+    M = MARGIN_PX * S
 
     img  = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
-    font_lbl  = _load_font(FONT_BOLD_PATH, 36)
-    font_data = _load_font(FONT_BOLD_PATH, 36)
-    font_bot  = _load_font(FONT_BOLD_PATH, 32)
+    font_lbl  = _load_font(FONT_BOLD_PATH, 36 * S)
+    font_data = _load_font(FONT_BOLD_PATH, 36 * S)
+    font_bot  = _load_font(FONT_BOLD_PATH, 32 * S)
 
     CX, CY = M, M
     CW, CH = W - 2*M, H - 2*M
@@ -308,11 +309,11 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     )
     qr = qrcode.QRCode(version=None,
                        error_correction=qrcode.constants.ERROR_CORRECT_L,
-                       box_size=3, border=1)
+                       box_size=6, border=1)
     qr.add_data(qr_text)
     qr.make(fit=True)
     qr_img  = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-    qr_size = min(QR_W - 4, ROW_H * QR_ROWS - 4)
+    qr_size = min(QR_W - 4*S, ROW_H * QR_ROWS - 4*S)
     qr_img  = qr_img.resize((qr_size, qr_size), Image.LANCZOS)
     img.paste(qr_img, (X_QR + (QR_W - qr_size)//2, CY + (ROW_H*QR_ROWS - qr_size)//2))
 
@@ -333,31 +334,33 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
         y1 = y0 + ROW_H
         x_right = X_QR if i < QR_ROWS else X_END
         if i > 0:
-            draw.line([(CX, y0), (X_END if i >= QR_ROWS else x_right, y0)], fill="black", width=1)
-        draw.line([(X_DATA, y0), (X_DATA, y1)], fill="black", width=1)
+            draw.line([(CX, y0), (X_END if i >= QR_ROWS else x_right, y0)], fill="black", width=S)
+        draw.line([(X_DATA, y0), (X_DATA, y1)], fill="black", width=S)
         _draw_cell(draw, X_LBL, y0, X_DATA, y1, lbl, font_lbl, "center")
         _draw_cell(draw, X_DATA, y0, x_right, y1, val, font_data, "left")
 
-    draw.line([(X_QR, CY), (X_QR, CY + ROW_H * QR_ROWS)], fill="black", width=1)
+    draw.line([(X_QR, CY), (X_QR, CY + ROW_H * QR_ROWS)], fill="black", width=S)
 
     # 底部行
     BY = CY + MAIN_H
     BH = BOT_H
-    draw.line([(CX, BY),      (X_END, BY)],      fill="black", width=2)
-    draw.line([(CX, BY + BH), (X_END, BY + BH)], fill="black", width=2)
+    draw.line([(CX, BY),      (X_END, BY)],      fill="black", width=2*S)
+    draw.line([(CX, BY + BH), (X_END, BY + BH)], fill="black", width=2*S)
     b1 = CX + int(CW * 0.22)
     b2 = CX + int(CW * 0.50)
     b3 = CX + int(CW * 0.72)
     for x in (b1, b2, b3):
-        draw.line([(x, BY), (x, BY + BH)], fill="black", width=1)
+        draw.line([(x, BY), (x, BY + BH)], fill="black", width=S)
     _draw_cell(draw, CX, BY, b1,    BY+BH, "ERP序號",                         font_bot, "center")
     _draw_cell(draw, b1,  BY, b2,   BY+BH, str(record.get("序號") or ""),     font_bot, "center")
     _draw_cell(draw, b2,  BY, b3,   BY+BH, "訂單編號",                        font_bot, "center")
     _draw_cell(draw, b3,  BY, X_END,BY+BH, str(record.get("訂單編號") or ""), font_bot, "center")
 
     # 外框
-    draw.rectangle([(CX, CY), (X_END, BY + BH)], outline="black", width=2)
-    return img
+    draw.rectangle([(CX, CY), (X_END, BY + BH)], outline="black", width=2*S)
+
+    # 縮回原尺寸（LANCZOS 濾波產生抗鋸齒效果）
+    return img.resize((LABEL_W_PX, LABEL_H_PX), Image.LANCZOS)
 
 
 # ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
