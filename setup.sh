@@ -30,7 +30,7 @@ fi
 # 安裝 Python 套件
 echo "→ 安裝 Python 套件..."
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet pycups "qrcode[pil]" pillow openpyxl
+"$VENV_DIR/bin/pip" install --quiet pycups "qrcode[pil]" pillow openpyxl reportlab
 
 # 註冊桌面啟動檔
 echo "→ 註冊桌面啟動檔..."

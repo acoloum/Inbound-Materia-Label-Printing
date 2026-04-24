@@ -17,6 +17,13 @@ import qrcode
 import openpyxl
 from datetime import datetime
 
+# reportlab：向量 PDF 輸出（熱感印表機文字抗鋸齒關鍵）
+from reportlab.lib.units import mm as RL_MM
+from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
+
 # ── 設定常數 ──────────────────────────────────────────────────────────────────
 APP_TITLE   = "必榮 進料標籤列印系統"
 _BASE       = os.path.dirname(os.path.abspath(__file__))
@@ -371,31 +378,155 @@ _CUPS_OPTIONS = {
     "orientation-requested": "3",
 }
 
+# ── 向量 PDF 產生（避開熱感印表機灰階→1bit 門檻化造成的鋸齒）─────────────────
 
-def print_label_simple(printer_name, pil_image):
-    """列印單張標籤（預覽用或單張列印）"""
-    print_labels_batch(printer_name, [pil_image], title="進料標籤")
+_RL_FONT_NAME = "CJK-Bold"
+_RL_FONT_REGISTERED = False
 
 
-def print_labels_batch(printer_name, pil_images, title="進料標籤批次"):
-    """
-    將多張標籤合併為一個 CUPS 工作送印，避免每張獨立 Job 造成延遲。
-    pil_images: list of PIL.Image
-    """
-    if not pil_images:
+def _register_rl_font():
+    global _RL_FONT_REGISTERED
+    if _RL_FONT_REGISTERED:
         return
+    p = FONT_BOLD_PATH or FONT_PATH
+    if not p or not os.path.exists(p):
+        raise RuntimeError("找不到 CJK 字型，請先安裝 fonts-noto-cjk")
+    pdfmetrics.registerFont(TTFont(_RL_FONT_NAME, p))
+    _RL_FONT_REGISTERED = True
+
+
+def _make_qr_image(record, pkg_no, pkg_total):
+    """產生 QR Code PIL 圖（作為 PDF 內嵌圖像）"""
+    qr_text = (
+        f"供應商 : {record.get('供應商名稱','')}\n"
+        f"進貨日期 : {record.get('進貨日期','')}\n"
+        f"材質/特殊 : {record.get('材質','')}{record.get('特殊','')}\n"
+        f"尺寸 : {record.get('尺寸','')}\n"
+        f"長度 : {record.get('長度','')}\n"
+        f"批號 : {record.get('批號','')}\n"
+        f"數量 : {pkg_no}/{pkg_total}\n"
+        f"製造編號/爐號 : {record.get('製造編號/爐號','')}\n"
+        f"ERP序號 : {record.get('序號','')}\n"
+        f"訂單編號 : {record.get('訂單編號','')}"
+    )
+    qr = qrcode.QRCode(version=None,
+                       error_correction=qrcode.constants.ERROR_CORRECT_L,
+                       box_size=10, border=1)
+    qr.add_data(qr_text)
+    qr.make(fit=True)
+    return qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+
+def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
+    """在指定格子內繪製文字（座標皆為 top-based mm；頁高 = LABEL_H_MM）"""
+    cell_w = x2 - x1
+    cell_h = y2 - y1
+    pad = 0.5
+    while text:
+        w_mm = pdfmetrics.stringWidth(text, _RL_FONT_NAME, font_pt) / RL_MM
+        if w_mm <= cell_w - 2 * pad:
+            break
+        text = text[:-1]
+    if not text:
+        return
+    w_mm = pdfmetrics.stringWidth(text, _RL_FONT_NAME, font_pt) / RL_MM
+    tx = x1 + (cell_w - w_mm) / 2 if align == "center" else x1 + pad
+    # 垂直置中：基線位置（ascent/descent 單位為 pt，descent 為負數）
+    ascent, descent = pdfmetrics.getAscentDescent(_RL_FONT_NAME, font_pt)
+    baseline_top = y1 + cell_h / 2 - ((ascent + descent) / 2) / RL_MM
+    c.setFont(_RL_FONT_NAME, font_pt)
+    c.drawString(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM, text)
+
+
+def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
+    """在 reportlab canvas 上畫一張標籤（頁面大小 = LABEL_W_MM × LABEL_H_MM）"""
+    W, H, M = LABEL_W_MM, LABEL_H_MM, MARGIN_MM
+    CW, CH = W - 2*M, H - 2*M
+    BOT_H = CH * 0.09
+    MAIN_H = CH - BOT_H
+    ROW_H = MAIN_H / 8
+    LBL_W = CW * 0.331
+    QR_W  = CW * 0.260
+    X_LBL, X_DATA = M, M + LBL_W
+    X_QR, X_END = M + CW - QR_W, M + CW
+    QR_ROWS = 4
+    FONT_DATA = 36 * 72 / PRINT_DPI
+    FONT_BOT  = 32 * 72 / PRINT_DPI
+
+    def xpt(x_mm): return x_mm * RL_MM
+    def ypt(y_top_mm): return (H - y_top_mm) * RL_MM
+
+    # QR code
+    qr_img = _make_qr_image(record, pkg_no, pkg_total)
+    qr_size = min(QR_W - 0.5, ROW_H * QR_ROWS - 0.5)
+    qr_x = X_QR + (QR_W - qr_size) / 2
+    qr_y_top = M + (ROW_H * QR_ROWS - qr_size) / 2
+    c.drawImage(ImageReader(qr_img),
+                xpt(qr_x), ypt(qr_y_top + qr_size),
+                width=qr_size * RL_MM, height=qr_size * RL_MM)
+
+    # 8 行資料
+    rows_def = [
+        ("供應商",        str(record.get("供應商名稱") or "")),
+        ("進貨日期",      str(record.get("進貨日期") or "")),
+        ("材質/特殊",     f"{record.get('材質','')}{record.get('特殊','')}"),
+        ("尺寸",          str(record.get("尺寸") or "")),
+        ("長度",          str(record.get("長度") or "")),
+        ("批號",          str(record.get("批號") or "")),
+        ("數量",          f"{pkg_no}/{pkg_total}"),
+        ("製造編號/爐號", str(record.get("製造編號/爐號") or "")),
+    ]
+    c.setLineWidth(0.3)
+    for i, (lbl, val) in enumerate(rows_def):
+        y0 = M + i * ROW_H
+        y1 = y0 + ROW_H
+        x_right = X_QR if i < QR_ROWS else X_END
+        if i > 0:
+            c.line(xpt(M), ypt(y0), xpt(X_END if i >= QR_ROWS else x_right), ypt(y0))
+        c.line(xpt(X_DATA), ypt(y0), xpt(X_DATA), ypt(y1))
+        _draw_text_cell_pdf(c, X_LBL,  y0, X_DATA,  y1, lbl, FONT_DATA, "center")
+        _draw_text_cell_pdf(c, X_DATA, y0, x_right, y1, val, FONT_DATA, "left")
+    c.line(xpt(X_QR), ypt(M), xpt(X_QR), ypt(M + ROW_H * QR_ROWS))
+
+    # 底部列
+    BY, BH = M + MAIN_H, BOT_H
+    BY_bot = BY + BH
+    c.setLineWidth(0.6)
+    c.line(xpt(M), ypt(BY),     xpt(X_END), ypt(BY))
+    c.line(xpt(M), ypt(BY_bot), xpt(X_END), ypt(BY_bot))
+    b1, b2, b3 = M + CW*0.22, M + CW*0.50, M + CW*0.72
+    c.setLineWidth(0.3)
+    for x in (b1, b2, b3):
+        c.line(xpt(x), ypt(BY), xpt(x), ypt(BY_bot))
+    _draw_text_cell_pdf(c, M,  BY, b1,    BY_bot, "ERP序號",                       FONT_BOT, "center")
+    _draw_text_cell_pdf(c, b1, BY, b2,    BY_bot, str(record.get("序號") or ""),   FONT_BOT, "center")
+    _draw_text_cell_pdf(c, b2, BY, b3,    BY_bot, "訂單編號",                      FONT_BOT, "center")
+    _draw_text_cell_pdf(c, b3, BY, X_END, BY_bot, str(record.get("訂單編號") or ""), FONT_BOT, "center")
+
+    # 外框
+    c.setLineWidth(0.6)
+    c.rect(xpt(M), ypt(BY_bot), CW * RL_MM, CH * RL_MM)
+
+
+def print_labels_vector(printer_name, jobs_info, title="進料標籤批次"):
+    """
+    用向量 PDF 送印：文字與線條為 PDF 原生物件，印表機驅動以原生 DPI 直接渲染，
+    完全跳過灰階→1bit 門檻化，根本解決字體鋸齒。
+    jobs_info: list of (record, pkg_no, pkg_total)
+    """
+    if not jobs_info:
+        return
+    _register_rl_font()
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             tmp_path = f.name
-        rgb_imgs = [img.convert("RGB") for img in pil_images]
-        head, rest = rgb_imgs[0], rgb_imgs[1:]
-        head.save(
-            tmp_path, "PDF",
-            resolution=PRINT_DPI,
-            save_all=True,
-            append_images=rest,
-        )
+        page_size = (LABEL_W_MM * RL_MM, LABEL_H_MM * RL_MM)
+        c = rl_canvas.Canvas(tmp_path, pagesize=page_size)
+        for rec, pkg_no, pkg_total in jobs_info:
+            _draw_label_on_canvas(c, rec, pkg_no, pkg_total)
+            c.showPage()
+        c.save()
         conn = cups.Connection()
         conn.printFile(printer_name, tmp_path, title, _CUPS_OPTIONS)
     finally:
@@ -819,7 +950,7 @@ class PrintJobDialog(tk.Toplevel):
         self._success  = 0
         self._cancelled = False
         self._printed_log: dict[int, list] = {}  # sn -> [label_nos]
-        self._images: list = []  # 批次累積的 PIL 圖
+        self._jobs_info: list = []  # 批次累積的 (rec, n, total_qty)，供向量 PDF 繪製
 
         total = len(jobs)
         w, h = 460, 200
@@ -850,7 +981,7 @@ class PrintJobDialog(tk.Toplevel):
         self.after(80, self._step)
 
     def _step(self):
-        """先批次產生所有標籤圖（顯示進度），再一次送 CUPS 列印"""
+        """先批次收集所有標籤資料（顯示進度），再一次以向量 PDF 送 CUPS 列印"""
         if self._cancelled or self._idx >= len(self._jobs):
             self._send_to_printer()
             return
@@ -858,12 +989,11 @@ class PrintJobDialog(tk.Toplevel):
         rec, n, total_qty, sn = self._jobs[self._idx]
         sup = rec.get("供應商名稱", "")
         self._lbl_info.config(
-            text=f"產生第 {self._idx+1} 張  供應商：{sup}  張數：{n}/{total_qty}")
+            text=f"準備第 {self._idx+1} 張  供應商：{sup}  張數：{n}/{total_qty}")
         self.update_idletasks()
 
         try:
-            img = make_label_image(rec, n, total_qty)
-            self._images.append(img)
+            self._jobs_info.append((rec, n, total_qty))
             self._printed_log.setdefault(sn, []).append(n)
             self._success += 1
         except Exception as e:
@@ -876,17 +1006,17 @@ class PrintJobDialog(tk.Toplevel):
         self.after(1, self._step)
 
     def _send_to_printer(self):
-        """將累積的所有標籤合併為單一 CUPS 工作送印"""
-        if self._cancelled or not self._images:
+        """將累積的所有標籤合併為單一 CUPS 向量 PDF 工作送印（避免鋸齒）"""
+        if self._cancelled or not self._jobs_info:
             self._finish()
             return
 
-        self._lbl_info.config(text=f"送至印表機中（{len(self._images)} 張）...")
+        self._lbl_info.config(text=f"送至印表機中（{len(self._jobs_info)} 張）...")
         self._btn_cancel.config(state="disabled")
         self.update_idletasks()
 
         try:
-            print_labels_batch(self._printer, self._images)
+            print_labels_vector(self._printer, self._jobs_info)
         except Exception as e:
             messagebox.showerror("列印錯誤", str(e), parent=self)
             self._success = 0
