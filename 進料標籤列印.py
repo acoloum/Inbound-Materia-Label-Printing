@@ -462,9 +462,13 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
         return
     w_mm = pdfmetrics.stringWidth(text, _RL_FONT_NAME, font_pt) / RL_MM
     tx = x1 + (cell_w - w_mm) / 2 if align == "center" else x1 + pad
-    # 垂直置中：基線位置（ascent/descent 單位為 pt，descent 為負數）
+    # 垂直置中：
+    #   glyph 視覺範圍 (top-based) = [baseline_top - ascent_mm, baseline_top - descent_mm]
+    #   （descent 為負，故 -descent_mm 為正，代表 baseline 下方）
+    #   視覺中心 = baseline_top - (ascent + descent)/2
+    #   令視覺中心 = cell_center  →  baseline_top = cell_center + (ascent+descent)/2
     ascent, descent = pdfmetrics.getAscentDescent(_RL_FONT_NAME, font_pt)
-    baseline_top = y1 + cell_h / 2 - ((ascent + descent) / 2) / RL_MM
+    baseline_top = y1 + cell_h / 2 + ((ascent + descent) / 2) / RL_MM
     # WQY MicroHei 僅 Regular 重量；以 stroke+fill 模擬粗體
     # setTextRenderMode 屬於 text object，不在 Canvas 上
     c.saveState()
