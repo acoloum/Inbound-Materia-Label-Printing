@@ -465,14 +465,17 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
     # 垂直置中：基線位置（ascent/descent 單位為 pt，descent 為負數）
     ascent, descent = pdfmetrics.getAscentDescent(_RL_FONT_NAME, font_pt)
     baseline_top = y1 + cell_h / 2 - ((ascent + descent) / 2) / RL_MM
-    c.setFont(_RL_FONT_NAME, font_pt)
     # WQY MicroHei 僅 Regular 重量；以 stroke+fill 模擬粗體
+    # setTextRenderMode 屬於 text object，不在 Canvas 上
     c.saveState()
     c.setFillColorRGB(0, 0, 0)
     c.setStrokeColorRGB(0, 0, 0)
     c.setLineWidth(font_pt * 0.04)  # 筆畫厚度隨字級微調
-    c.setTextRenderMode(2)           # 2 = fill + stroke
-    c.drawString(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM, text)
+    t = c.beginText(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM)
+    t.setFont(_RL_FONT_NAME, font_pt)
+    t.setTextRenderMode(2)  # 2 = fill + stroke
+    t.textOut(text)
+    c.drawText(t)
     c.restoreState()
 
 
