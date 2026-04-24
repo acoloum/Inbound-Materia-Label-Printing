@@ -385,14 +385,45 @@ _RL_FONT_REGISTERED = False
 
 
 def _register_rl_font():
+    """
+    註冊 reportlab 字型。
+    注意：reportlab 的 TTFont 不支援 PostScript (CFF) outlines；
+    Noto Sans CJK 屬於 CFF .ttc，無法使用，必須改用 TrueType outlines 的字型。
+    """
     global _RL_FONT_REGISTERED
     if _RL_FONT_REGISTERED:
         return
-    p = FONT_BOLD_PATH or FONT_PATH
-    if not p or not os.path.exists(p):
-        raise RuntimeError("找不到 CJK 字型，請先安裝 fonts-noto-cjk")
-    pdfmetrics.registerFont(TTFont(_RL_FONT_NAME, p))
-    _RL_FONT_REGISTERED = True
+
+    # TrueType outlines 的中文字型候選清單（依優先順序）
+    candidates = [
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+        ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",   0),
+        ("/usr/share/fonts/truetype/arphic/uming.ttc",     0),
+        ("/usr/share/fonts/truetype/arphic/ukai.ttc",      0),
+    ]
+    # 補上 fc-match 結果（可能是 CFF，會失敗；放最後當墊底）
+    for p in (FONT_BOLD_PATH, FONT_PATH):
+        if p and all(p != c[0] for c in candidates):
+            candidates.append((p, 0))
+
+    last_err = None
+    for path, idx in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(_RL_FONT_NAME, path, subfontIndex=idx))
+            _RL_FONT_REGISTERED = True
+            return
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise RuntimeError(
+        "找不到 TrueType 中文字型供 reportlab 使用。\n"
+        "請執行：sudo apt install fonts-wqy-microhei\n"
+        "（或重新執行 ./setup.sh）\n"
+        f"最後錯誤：{last_err}"
+    )
 
 
 def _make_qr_image(record, pkg_no, pkg_total):
@@ -435,7 +466,14 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
     ascent, descent = pdfmetrics.getAscentDescent(_RL_FONT_NAME, font_pt)
     baseline_top = y1 + cell_h / 2 - ((ascent + descent) / 2) / RL_MM
     c.setFont(_RL_FONT_NAME, font_pt)
+    # WQY MicroHei 僅 Regular 重量；以 stroke+fill 模擬粗體
+    c.saveState()
+    c.setFillColorRGB(0, 0, 0)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(font_pt * 0.04)  # 筆畫厚度隨字級微調
+    c.setTextRenderMode(2)           # 2 = fill + stroke
     c.drawString(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM, text)
+    c.restoreState()
 
 
 def _draw_label_on_canvas(c, record, pkg_no, pkg_total):

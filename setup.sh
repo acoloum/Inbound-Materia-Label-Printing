@@ -10,6 +10,8 @@ MISSING_APT=()
 python3 -c "import tkinter" 2>/dev/null || MISSING_APT+=(python3-tk)
 python3 -m venv --help >/dev/null 2>&1   || MISSING_APT+=(python3-venv)
 fc-list 2>/dev/null | grep -qi "NotoSansCJK" || MISSING_APT+=(fonts-noto-cjk)
+# reportlab 無法使用 Noto（CFF outlines），需 WQY MicroHei（TrueType outlines）
+fc-list 2>/dev/null | grep -qi "WenQuanYi Micro Hei" || MISSING_APT+=(fonts-wqy-microhei)
 dpkg -s libcups2-dev >/dev/null 2>&1 || MISSING_APT+=(libcups2-dev)
 dpkg -s python3-dev  >/dev/null 2>&1 || MISSING_APT+=(python3-dev)
 command -v gcc >/dev/null 2>&1        || MISSING_APT+=(gcc)
