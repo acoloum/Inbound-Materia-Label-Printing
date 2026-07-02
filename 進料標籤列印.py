@@ -49,6 +49,8 @@ def _find_cjk_font(bold=False):
     win_fonts = os.path.join(system_root, "Fonts")
     if os.name == "nt":
         candidates = [
+            os.path.join(win_fonts, "NotoSansTC-VF.ttf"),
+            os.path.join(win_fonts, "NotoSansHK-VF.ttf"),
             os.path.join(win_fonts, "msjhbd.ttc" if bold else "msjh.ttc"),
             os.path.join(win_fonts, "mingliub.ttc"),
             os.path.join(win_fonts, "simsun.ttc"),
@@ -413,26 +415,47 @@ def _print_labels_windows(printer_name, jobs_info):
     """使用 Windows GDI 將標籤影像依實際尺寸送至指定印表機"""
     try:
         import win32con
+        import win32gui
+        import win32print
         import win32ui
         from PIL import ImageWin
     except Exception as e:
         raise RuntimeError(f"缺少 Windows 列印元件 pywin32：{e}")
 
-    hdc = win32ui.CreateDC()
-    hdc.CreatePrinterDC(printer_name)
+    hprinter = win32print.OpenPrinter(printer_name)
     try:
-        dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
-        dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
-        offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
-        offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
-        target_w = int(LABEL_W_MM / 25.4 * dpi_x)
-        target_h = int(LABEL_H_MM / 25.4 * dpi_y)
+        devmode = win32print.GetPrinter(hprinter, 2)["pDevMode"]
+    finally:
+        win32print.ClosePrinter(hprinter)
 
-        hdc.StartDoc("進料標籤批次")
+    # Windows 預設印表機可能停在 A4。標籤機若未收到正確紙張大小，
+    # 連續列印時容易在第 1、2 張中間跑位或停住。
+    devmode.Fields |= (
+        win32con.DM_ORIENTATION
+        | win32con.DM_PAPERSIZE
+        | win32con.DM_PAPERLENGTH
+        | win32con.DM_PAPERWIDTH
+    )
+    devmode.Orientation = win32con.DMORIENT_PORTRAIT
+    devmode.PaperSize = win32con.DMPAPER_USER
+    devmode.PaperWidth = int(round(LABEL_W_MM * 10))
+    devmode.PaperLength = int(round(LABEL_H_MM * 10))
+
+    for index, (rec, pkg_no, pkg_total) in enumerate(jobs_info, start=1):
+        handle = win32gui.CreateDC("WINSPOOL", printer_name, devmode)
+        hdc = win32ui.CreateDCFromHandle(handle)
         try:
-            for rec, pkg_no, pkg_total in jobs_info:
-                img = make_label_image(rec, pkg_no, pkg_total).convert("RGB")
-                dib = ImageWin.Dib(img)
+            dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
+            dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
+            offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
+            offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
+            target_w = int(LABEL_W_MM / 25.4 * dpi_x)
+            target_h = int(LABEL_H_MM / 25.4 * dpi_y)
+
+            img = make_label_image(rec, pkg_no, pkg_total).convert("RGB")
+            dib = ImageWin.Dib(img)
+            hdc.StartDoc(f"進料標籤 {index}/{len(jobs_info)}")
+            try:
                 hdc.StartPage()
                 dib.draw(hdc.GetHandleOutput(), (
                     offset_x,
@@ -441,10 +464,10 @@ def _print_labels_windows(printer_name, jobs_info):
                     offset_y + target_h,
                 ))
                 hdc.EndPage()
+            finally:
+                hdc.EndDoc()
         finally:
-            hdc.EndDoc()
-    finally:
-        hdc.DeleteDC()
+            hdc.DeleteDC()
 
 
 # ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
