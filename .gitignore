@@ -11,9 +11,5 @@ __pycache__/
 *.pyc
 *.pyo
 
-# 打包產物
-build/
-dist/
-
 # Claude 工作區
 .claude/
