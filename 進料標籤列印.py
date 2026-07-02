@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 必榮 進料標籤列印系統
-Linux（Zorin OS / Ubuntu）版本 — 使用 CUPS 列印
+Windows 使用 GDI 列印，Linux（Zorin OS / Ubuntu）使用 CUPS 列印
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import os
+import sys
 import json
 import tempfile
-import cups
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
 import openpyxl
@@ -26,7 +26,12 @@ from reportlab.lib.utils import ImageReader
 
 # ── 設定常數 ──────────────────────────────────────────────────────────────────
 APP_TITLE   = "必榮 進料標籤列印系統"
-_BASE       = os.path.dirname(os.path.abspath(__file__))
+
+if getattr(sys, "frozen", False):
+    _BASE = os.path.dirname(sys.executable)
+else:
+    _BASE = os.path.dirname(os.path.abspath(__file__))
+
 DB_PATH     = os.path.join(_BASE, "FastReport_sqllite.db")
 CONFIG_PATH = os.path.join(_BASE, "settings.json")
 
@@ -39,7 +44,19 @@ LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
 MARGIN_PX   = int(MARGIN_MM   / 25.4 * PRINT_DPI)
 
 def _find_cjk_font(bold=False):
-    """用 fc-match 動態查詢 CJK 字型路徑，找不到才用靜態候補"""
+    """尋找可用的中文字型，優先使用目前作業系統內建字型"""
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    win_fonts = os.path.join(system_root, "Fonts")
+    if os.name == "nt":
+        candidates = [
+            os.path.join(win_fonts, "msjhbd.ttc" if bold else "msjh.ttc"),
+            os.path.join(win_fonts, "mingliub.ttc"),
+            os.path.join(win_fonts, "simsun.ttc"),
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+
     import subprocess
     weight = ":weight=bold" if bold else ""
     try:
@@ -370,6 +387,66 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     return img.resize((LABEL_W_PX, LABEL_H_PX), Image.LANCZOS)
 
 
+# ── 印表機支援 ────────────────────────────────────────────────────────────────
+
+def get_available_printers():
+    """取得目前系統可用印表機清單與預設印表機"""
+    if os.name == "nt":
+        try:
+            import win32print
+            flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+            printers = [p[2] for p in win32print.EnumPrinters(flags)]
+            default = win32print.GetDefaultPrinter()
+            return printers, default
+        except Exception:
+            return [], ""
+
+    try:
+        import cups
+        conn = cups.Connection()
+        return list(conn.getPrinters().keys()), conn.getDefault() or ""
+    except Exception:
+        return [], ""
+
+
+def _print_labels_windows(printer_name, jobs_info):
+    """使用 Windows GDI 將標籤影像依實際尺寸送至指定印表機"""
+    try:
+        import win32con
+        import win32ui
+        from PIL import ImageWin
+    except Exception as e:
+        raise RuntimeError(f"缺少 Windows 列印元件 pywin32：{e}")
+
+    hdc = win32ui.CreateDC()
+    hdc.CreatePrinterDC(printer_name)
+    try:
+        dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
+        dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
+        offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
+        offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
+        target_w = int(LABEL_W_MM / 25.4 * dpi_x)
+        target_h = int(LABEL_H_MM / 25.4 * dpi_y)
+
+        hdc.StartDoc("進料標籤批次")
+        try:
+            for rec, pkg_no, pkg_total in jobs_info:
+                img = make_label_image(rec, pkg_no, pkg_total).convert("RGB")
+                dib = ImageWin.Dib(img)
+                hdc.StartPage()
+                dib.draw(hdc.GetHandleOutput(), (
+                    offset_x,
+                    offset_y,
+                    offset_x + target_w,
+                    offset_y + target_h,
+                ))
+                hdc.EndPage()
+        finally:
+            hdc.EndDoc()
+    finally:
+        hdc.DeleteDC()
+
+
 # ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
 
 _CUPS_OPTIONS = {
@@ -555,12 +632,18 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
 
 def print_labels_vector(printer_name, jobs_info, title="進料標籤批次"):
     """
-    用向量 PDF 送印：文字與線條為 PDF 原生物件，印表機驅動以原生 DPI 直接渲染，
-    完全跳過灰階→1bit 門檻化，根本解決字體鋸齒。
+    依作業系統送印。
+    Windows 使用 GDI 影像列印；Linux 使用向量 PDF 送 CUPS 列印。
     jobs_info: list of (record, pkg_no, pkg_total)
     """
     if not jobs_info:
         return
+
+    if os.name == "nt":
+        _print_labels_windows(printer_name, jobs_info)
+        return
+
+    import cups
     _register_rl_font()
     tmp_path = None
     try:
@@ -679,13 +762,7 @@ class App(tk.Tk):
     # ── 輔助方法 ──────────────────────────────────────────────────────────────
 
     def _refresh_printers(self):
-        try:
-            conn     = cups.Connection()
-            printers = list(conn.getPrinters().keys())
-            default  = conn.getDefault() or ""
-        except Exception:
-            printers = []
-            default  = ""
+        printers, default = get_available_printers()
         self._printer_cb["values"] = printers
         if default in printers:
             self._printer_var.set(default)
