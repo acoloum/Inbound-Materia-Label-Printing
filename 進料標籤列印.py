@@ -49,10 +49,10 @@ def _find_cjk_font(bold=False):
     win_fonts = os.path.join(system_root, "Fonts")
     if os.name == "nt":
         candidates = [
+            os.path.join(win_fonts, "msjhbd.ttc" if bold else "msjh.ttc"),
+            os.path.join(win_fonts, "mingliub.ttc" if bold else "mingliu.ttc"),
             os.path.join(win_fonts, "NotoSansTC-VF.ttf"),
             os.path.join(win_fonts, "NotoSansHK-VF.ttf"),
-            os.path.join(win_fonts, "msjhbd.ttc" if bold else "msjh.ttc"),
-            os.path.join(win_fonts, "mingliub.ttc"),
             os.path.join(win_fonts, "simsun.ttc"),
         ]
         for p in candidates:
@@ -411,8 +411,37 @@ def get_available_printers():
         return [], ""
 
 
+def _build_label_pdf(pdf_path, jobs_info):
+    """使用與 Linux 版相同的 reportlab 版面產生標籤 PDF"""
+    _register_rl_font()
+    page_size = (LABEL_W_MM * RL_MM, LABEL_H_MM * RL_MM)
+    c = rl_canvas.Canvas(pdf_path, pagesize=page_size)
+    for rec, pkg_no, pkg_total in jobs_info:
+        _draw_label_on_canvas(c, rec, pkg_no, pkg_total)
+        c.showPage()
+    c.save()
+
+
+def _render_label_pdf_page(pdf_doc, page_index, dpi_x, dpi_y, target_size=None):
+    """將 reportlab PDF 頁面以印表機 DPI 轉成黑白高對比影像"""
+    try:
+        import fitz
+    except Exception as e:
+        raise RuntimeError(f"缺少 PDF 轉圖元件 PyMuPDF：{e}")
+
+    page = pdf_doc.load_page(page_index)
+    matrix = fitz.Matrix(dpi_x / 72, dpi_y / 72)
+    pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    # 熱感標籤機對灰階抗鋸齒很敏感；轉成黑白可避免字與線被驅動淡化。
+    img = img.convert("L").point(lambda p: 0 if p < 180 else 255, "1").convert("RGB")
+    if target_size and img.size != target_size:
+        img = img.resize(target_size, Image.Resampling.NEAREST)
+    return img
+
+
 def _print_labels_windows(printer_name, jobs_info):
-    """使用 Windows GDI 將標籤影像依實際尺寸送至指定印表機"""
+    """使用原版 reportlab 版面轉成 Windows GDI 可送印影像"""
     try:
         import win32con
         import win32gui
@@ -441,33 +470,50 @@ def _print_labels_windows(printer_name, jobs_info):
     devmode.PaperWidth = int(round(LABEL_W_MM * 10))
     devmode.PaperLength = int(round(LABEL_H_MM * 10))
 
-    for index, (rec, pkg_no, pkg_total) in enumerate(jobs_info, start=1):
-        handle = win32gui.CreateDC("WINSPOOL", printer_name, devmode)
-        hdc = win32ui.CreateDCFromHandle(handle)
-        try:
-            dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
-            dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
-            offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
-            offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
-            target_w = int(LABEL_W_MM / 25.4 * dpi_x)
-            target_h = int(LABEL_H_MM / 25.4 * dpi_y)
+    tmp_path = None
+    pdf_doc = None
+    try:
+        import fitz
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            tmp_path = f.name
+        _build_label_pdf(tmp_path, jobs_info)
+        pdf_doc = fitz.open(tmp_path)
 
-            img = make_label_image(rec, pkg_no, pkg_total).convert("RGB")
-            dib = ImageWin.Dib(img)
-            hdc.StartDoc(f"進料標籤 {index}/{len(jobs_info)}")
+        for index in range(len(jobs_info)):
+            handle = win32gui.CreateDC("WINSPOOL", printer_name, devmode)
+            hdc = win32ui.CreateDCFromHandle(handle)
             try:
-                hdc.StartPage()
-                dib.draw(hdc.GetHandleOutput(), (
-                    offset_x,
-                    offset_y,
-                    offset_x + target_w,
-                    offset_y + target_h,
-                ))
-                hdc.EndPage()
+                dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
+                dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
+                offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
+                offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
+                target_w = int(LABEL_W_MM / 25.4 * dpi_x)
+                target_h = int(LABEL_H_MM / 25.4 * dpi_y)
+
+                img = _render_label_pdf_page(
+                    pdf_doc, index, dpi_x, dpi_y,
+                    target_size=(target_w, target_h),
+                )
+                dib = ImageWin.Dib(img)
+                hdc.StartDoc(f"進料標籤 {index + 1}/{len(jobs_info)}")
+                try:
+                    hdc.StartPage()
+                    dib.draw(hdc.GetHandleOutput(), (
+                        offset_x,
+                        offset_y,
+                        offset_x + target_w,
+                        offset_y + target_h,
+                    ))
+                    hdc.EndPage()
+                finally:
+                    hdc.EndDoc()
             finally:
-                hdc.EndDoc()
-        finally:
-            hdc.DeleteDC()
+                hdc.DeleteDC()
+    finally:
+        if pdf_doc is not None:
+            pdf_doc.close()
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ── Linux CUPS 列印 ───────────────────────────────────────────────────────────
@@ -502,7 +548,7 @@ def _register_rl_font():
         ("/usr/share/fonts/truetype/arphic/ukai.ttc",      0),
     ]
     # 補上 fc-match 結果（可能是 CFF，會失敗；放最後當墊底）
-    for p in (FONT_BOLD_PATH, FONT_PATH):
+    for p in (FONT_PATH, FONT_BOLD_PATH):
         if p and all(p != c[0] for c in candidates):
             candidates.append((p, 0))
 
@@ -574,7 +620,7 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
     c.saveState()
     c.setFillColorRGB(0, 0, 0)
     c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(font_pt * 0.04)  # 筆畫厚度隨字級微調
+    c.setLineWidth(font_pt * 0.025)  # 筆畫厚度隨字級微調
     t = c.beginText(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM)
     t.setFont(_RL_FONT_NAME, font_pt)
     t.setTextRenderMode(2)  # 2 = fill + stroke
