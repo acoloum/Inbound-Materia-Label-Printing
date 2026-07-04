@@ -45,7 +45,8 @@ LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
 MARGIN_X_PX = int(MARGIN_X_MM / 25.4 * PRINT_DPI)
 MARGIN_Y_PX = int(MARGIN_Y_MM / 25.4 * PRINT_DPI)
 GRID_LINE_PT = 0.45
-FRAME_LINE_PT = 0.8
+BOTTOM_GRID_LINE_PT = 0.65
+FRAME_LINE_PT = 0.9
 
 def _find_cjk_font(bold=False):
     """尋找可用的中文字型，優先使用目前作業系統內建字型"""
@@ -301,6 +302,7 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     W, H = LABEL_W_PX * S, LABEL_H_PX * S
     MX, MY = MARGIN_X_PX * S, MARGIN_Y_PX * S
     grid_w = 2 * S
+    bottom_grid_w = 3 * S
     frame_w = 3 * S
 
     img  = Image.new("RGB", (W, H), "white")
@@ -382,7 +384,7 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     b2 = CX + int(CW * 0.50)
     b3 = CX + int(CW * 0.72)
     for x in (b1, b2, b3):
-        draw.line([(x, BY), (x, BY + BH)], fill="black", width=grid_w)
+        draw.line([(x, BY), (x, BY + BH)], fill="black", width=bottom_grid_w)
     _draw_cell(draw, CX, BY, b1,    BY+BH, "ERP序號",                         font_bot, "center")
     _draw_cell(draw, b1,  BY, b2,   BY+BH, str(record.get("序號") or ""),     font_bot, "center")
     _draw_cell(draw, b2,  BY, b3,   BY+BH, "訂單編號",                        font_bot, "center")
@@ -692,7 +694,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     c.line(xpt(MX), ypt(BY),     xpt(X_END), ypt(BY))
     c.line(xpt(MX), ypt(BY_bot), xpt(X_END), ypt(BY_bot))
     b1, b2, b3 = MX + CW*0.22, MX + CW*0.50, MX + CW*0.72
-    c.setLineWidth(GRID_LINE_PT)
+    c.setLineWidth(BOTTOM_GRID_LINE_PT)
     for x in (b1, b2, b3):
         c.line(xpt(x), ypt(BY), xpt(x), ypt(BY_bot))
     _draw_text_cell_pdf(c, MX, BY, b1,    BY_bot, "ERP序號",                       FONT_BOT, "center")
