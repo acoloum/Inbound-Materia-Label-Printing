@@ -384,6 +384,7 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
 
     # 外框
     draw.rectangle([(CX, CY), (X_END, BY + BH)], outline="black", width=2*S)
+    draw.line([(X_END, CY), (X_END, BY + BH)], fill="black", width=2*S)
 
     # 縮回原尺寸（LANCZOS 濾波產生抗鋸齒效果）
     return img.resize((LABEL_W_PX, LABEL_H_PX), Image.LANCZOS)
@@ -620,7 +621,7 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
     c.saveState()
     c.setFillColorRGB(0, 0, 0)
     c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(font_pt * 0.035)  # 筆畫厚度隨字級微調
+    c.setLineWidth(font_pt * 0.032)  # 筆畫厚度隨字級微調
     t = c.beginText(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM)
     t.setFont(_RL_FONT_NAME, font_pt)
     t.setTextRenderMode(2)  # 2 = fill + stroke
@@ -697,6 +698,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     # 外框
     c.setLineWidth(0.6)
     c.rect(xpt(M), ypt(BY_bot), CW * RL_MM, CH * RL_MM)
+    c.line(xpt(X_END), ypt(M), xpt(X_END), ypt(BY_bot))
 
 
 def print_labels_vector(printer_name, jobs_info, title="進料標籤批次"):
