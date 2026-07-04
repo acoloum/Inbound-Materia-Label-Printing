@@ -44,6 +44,8 @@ LABEL_W_PX  = int(LABEL_W_MM / 25.4 * PRINT_DPI)
 LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
 MARGIN_X_PX = int(MARGIN_X_MM / 25.4 * PRINT_DPI)
 MARGIN_Y_PX = int(MARGIN_Y_MM / 25.4 * PRINT_DPI)
+GRID_LINE_PT = 0.45
+FRAME_LINE_PT = 0.8
 
 def _find_cjk_font(bold=False):
     """尋找可用的中文字型，優先使用目前作業系統內建字型"""
@@ -298,6 +300,8 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     S = 2  # 超採樣倍率
     W, H = LABEL_W_PX * S, LABEL_H_PX * S
     MX, MY = MARGIN_X_PX * S, MARGIN_Y_PX * S
+    grid_w = 2 * S
+    frame_w = 3 * S
 
     img  = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
@@ -362,31 +366,31 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
         y1 = y0 + ROW_H
         x_right = X_QR if i < QR_ROWS else X_END
         if i > 0:
-            draw.line([(CX, y0), (X_END if i >= QR_ROWS else x_right, y0)], fill="black", width=S)
-        draw.line([(X_DATA, y0), (X_DATA, y1)], fill="black", width=S)
+            draw.line([(CX, y0), (X_END if i >= QR_ROWS else x_right, y0)], fill="black", width=grid_w)
+        draw.line([(X_DATA, y0), (X_DATA, y1)], fill="black", width=grid_w)
         _draw_cell(draw, X_LBL, y0, X_DATA, y1, lbl, font_lbl, "center")
         _draw_cell(draw, X_DATA, y0, x_right, y1, val, font_data, "left")
 
-    draw.line([(X_QR, CY), (X_QR, CY + ROW_H * QR_ROWS)], fill="black", width=S)
+    draw.line([(X_QR, CY), (X_QR, CY + ROW_H * QR_ROWS)], fill="black", width=grid_w)
 
     # 底部行
     BY = CY + MAIN_H
     BH = BOT_H
-    draw.line([(CX, BY),      (X_END, BY)],      fill="black", width=2*S)
-    draw.line([(CX, BY + BH), (X_END, BY + BH)], fill="black", width=2*S)
+    draw.line([(CX, BY),      (X_END, BY)],      fill="black", width=frame_w)
+    draw.line([(CX, BY + BH), (X_END, BY + BH)], fill="black", width=frame_w)
     b1 = CX + int(CW * 0.22)
     b2 = CX + int(CW * 0.50)
     b3 = CX + int(CW * 0.72)
     for x in (b1, b2, b3):
-        draw.line([(x, BY), (x, BY + BH)], fill="black", width=S)
+        draw.line([(x, BY), (x, BY + BH)], fill="black", width=grid_w)
     _draw_cell(draw, CX, BY, b1,    BY+BH, "ERP序號",                         font_bot, "center")
     _draw_cell(draw, b1,  BY, b2,   BY+BH, str(record.get("序號") or ""),     font_bot, "center")
     _draw_cell(draw, b2,  BY, b3,   BY+BH, "訂單編號",                        font_bot, "center")
     _draw_cell(draw, b3,  BY, X_END,BY+BH, str(record.get("訂單編號") or ""), font_bot, "center")
 
     # 外框
-    draw.rectangle([(CX, CY), (X_END, BY + BH)], outline="black", width=2*S)
-    draw.line([(X_END, CY), (X_END, BY + BH)], fill="black", width=2*S)
+    draw.rectangle([(CX, CY), (X_END, BY + BH)], outline="black", width=frame_w)
+    draw.line([(X_END, CY), (X_END, BY + BH)], fill="black", width=frame_w)
 
     # 縮回原尺寸（LANCZOS 濾波產生抗鋸齒效果）
     return img.resize((LABEL_W_PX, LABEL_H_PX), Image.LANCZOS)
@@ -669,7 +673,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
         ("數量",          f"{pkg_no}/{pkg_total}"),
         ("製造編號/爐號", str(record.get("製造編號/爐號") or "")),
     ]
-    c.setLineWidth(0.3)
+    c.setLineWidth(GRID_LINE_PT)
     for i, (lbl, val) in enumerate(rows_def):
         y0 = MY + i * ROW_H
         y1 = y0 + ROW_H
@@ -684,11 +688,11 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     # 底部列
     BY, BH = MY + MAIN_H, BOT_H
     BY_bot = BY + BH
-    c.setLineWidth(0.6)
+    c.setLineWidth(FRAME_LINE_PT)
     c.line(xpt(MX), ypt(BY),     xpt(X_END), ypt(BY))
     c.line(xpt(MX), ypt(BY_bot), xpt(X_END), ypt(BY_bot))
     b1, b2, b3 = MX + CW*0.22, MX + CW*0.50, MX + CW*0.72
-    c.setLineWidth(0.3)
+    c.setLineWidth(GRID_LINE_PT)
     for x in (b1, b2, b3):
         c.line(xpt(x), ypt(BY), xpt(x), ypt(BY_bot))
     _draw_text_cell_pdf(c, MX, BY, b1,    BY_bot, "ERP序號",                       FONT_BOT, "center")
@@ -697,7 +701,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     _draw_text_cell_pdf(c, b3, BY, X_END, BY_bot, str(record.get("訂單編號") or ""), FONT_BOT, "center")
 
     # 外框
-    c.setLineWidth(0.6)
+    c.setLineWidth(FRAME_LINE_PT)
     c.rect(xpt(MX), ypt(BY_bot), CW * RL_MM, CH * RL_MM)
     c.line(xpt(X_END), ypt(MY), xpt(X_END), ypt(BY_bot))
 
