@@ -37,11 +37,13 @@ CONFIG_PATH = os.path.join(_BASE, "settings.json")
 
 LABEL_W_MM  = 99.86
 LABEL_H_MM  = 59.3
-MARGIN_MM   = 2.5
+MARGIN_X_MM = 3.5
+MARGIN_Y_MM = 2.5
 PRINT_DPI   = 203
 LABEL_W_PX  = int(LABEL_W_MM / 25.4 * PRINT_DPI)
 LABEL_H_PX  = int(LABEL_H_MM / 25.4 * PRINT_DPI)
-MARGIN_PX   = int(MARGIN_MM   / 25.4 * PRINT_DPI)
+MARGIN_X_PX = int(MARGIN_X_MM / 25.4 * PRINT_DPI)
+MARGIN_Y_PX = int(MARGIN_Y_MM / 25.4 * PRINT_DPI)
 
 def _find_cjk_font(bold=False):
     """尋找可用的中文字型，優先使用目前作業系統內建字型"""
@@ -295,7 +297,7 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     """產生一張標籤的 PIL Image，以 2 倍超採樣繪製後縮回原尺寸以改善字體鋸齒"""
     S = 2  # 超採樣倍率
     W, H = LABEL_W_PX * S, LABEL_H_PX * S
-    M = MARGIN_PX * S
+    MX, MY = MARGIN_X_PX * S, MARGIN_Y_PX * S
 
     img  = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
@@ -304,8 +306,8 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
     font_data = _load_font(FONT_BOLD_PATH, 36 * S)
     font_bot  = _load_font(FONT_BOLD_PATH, 36 * S)
 
-    CX, CY = M, M
-    CW, CH = W - 2*M, H - 2*M
+    CX, CY = MX, MY
+    CW, CH = W - 2*MX, H - 2*MY
 
     BOT_H  = int(CH * 0.09)
     MAIN_H = CH - BOT_H
@@ -632,15 +634,16 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
 
 def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     """在 reportlab canvas 上畫一張標籤（頁面大小 = LABEL_W_MM × LABEL_H_MM）"""
-    W, H, M = LABEL_W_MM, LABEL_H_MM, MARGIN_MM
-    CW, CH = W - 2*M, H - 2*M
+    W, H = LABEL_W_MM, LABEL_H_MM
+    MX, MY = MARGIN_X_MM, MARGIN_Y_MM
+    CW, CH = W - 2*MX, H - 2*MY
     BOT_H = CH * 0.09
     MAIN_H = CH - BOT_H
     ROW_H = MAIN_H / 8
     LBL_W = CW * 0.331
     QR_W  = CW * 0.260
-    X_LBL, X_DATA = M, M + LBL_W
-    X_QR, X_END = M + CW - QR_W, M + CW
+    X_LBL, X_DATA = MX, MX + LBL_W
+    X_QR, X_END = MX + CW - QR_W, MX + CW
     QR_ROWS = 4
     FONT_DATA = 36 * 72 / PRINT_DPI
     FONT_BOT  = 36 * 72 / PRINT_DPI
@@ -652,7 +655,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     qr_img = _make_qr_image(record, pkg_no, pkg_total)
     qr_size = min(QR_W - 0.5, ROW_H * QR_ROWS - 0.5)
     qr_x = X_QR + (QR_W - qr_size) / 2
-    qr_y_top = M + (ROW_H * QR_ROWS - qr_size) / 2
+    qr_y_top = MY + (ROW_H * QR_ROWS - qr_size) / 2
     c.drawImage(ImageReader(qr_img),
                 xpt(qr_x), ypt(qr_y_top + qr_size),
                 width=qr_size * RL_MM, height=qr_size * RL_MM)
@@ -670,35 +673,35 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     ]
     c.setLineWidth(0.3)
     for i, (lbl, val) in enumerate(rows_def):
-        y0 = M + i * ROW_H
+        y0 = MY + i * ROW_H
         y1 = y0 + ROW_H
         x_right = X_QR if i < QR_ROWS else X_END
         if i > 0:
-            c.line(xpt(M), ypt(y0), xpt(X_END if i >= QR_ROWS else x_right), ypt(y0))
+            c.line(xpt(MX), ypt(y0), xpt(X_END if i >= QR_ROWS else x_right), ypt(y0))
         c.line(xpt(X_DATA), ypt(y0), xpt(X_DATA), ypt(y1))
         _draw_text_cell_pdf(c, X_LBL,  y0, X_DATA,  y1, lbl, FONT_DATA, "center")
         _draw_text_cell_pdf(c, X_DATA, y0, x_right, y1, val, FONT_DATA, "left")
-    c.line(xpt(X_QR), ypt(M), xpt(X_QR), ypt(M + ROW_H * QR_ROWS))
+    c.line(xpt(X_QR), ypt(MY), xpt(X_QR), ypt(MY + ROW_H * QR_ROWS))
 
     # 底部列
-    BY, BH = M + MAIN_H, BOT_H
+    BY, BH = MY + MAIN_H, BOT_H
     BY_bot = BY + BH
     c.setLineWidth(0.6)
-    c.line(xpt(M), ypt(BY),     xpt(X_END), ypt(BY))
-    c.line(xpt(M), ypt(BY_bot), xpt(X_END), ypt(BY_bot))
-    b1, b2, b3 = M + CW*0.22, M + CW*0.50, M + CW*0.72
+    c.line(xpt(MX), ypt(BY),     xpt(X_END), ypt(BY))
+    c.line(xpt(MX), ypt(BY_bot), xpt(X_END), ypt(BY_bot))
+    b1, b2, b3 = MX + CW*0.22, MX + CW*0.50, MX + CW*0.72
     c.setLineWidth(0.3)
     for x in (b1, b2, b3):
         c.line(xpt(x), ypt(BY), xpt(x), ypt(BY_bot))
-    _draw_text_cell_pdf(c, M,  BY, b1,    BY_bot, "ERP序號",                       FONT_BOT, "center")
+    _draw_text_cell_pdf(c, MX, BY, b1,    BY_bot, "ERP序號",                       FONT_BOT, "center")
     _draw_text_cell_pdf(c, b1, BY, b2,    BY_bot, str(record.get("序號") or ""),   FONT_BOT, "center")
     _draw_text_cell_pdf(c, b2, BY, b3,    BY_bot, "訂單編號",                      FONT_BOT, "center")
     _draw_text_cell_pdf(c, b3, BY, X_END, BY_bot, str(record.get("訂單編號") or ""), FONT_BOT, "center")
 
     # 外框
     c.setLineWidth(0.6)
-    c.rect(xpt(M), ypt(BY_bot), CW * RL_MM, CH * RL_MM)
-    c.line(xpt(X_END), ypt(M), xpt(X_END), ypt(BY_bot))
+    c.rect(xpt(MX), ypt(BY_bot), CW * RL_MM, CH * RL_MM)
+    c.line(xpt(X_END), ypt(MY), xpt(X_END), ypt(BY_bot))
 
 
 def print_labels_vector(printer_name, jobs_info, title="進料標籤批次"):
