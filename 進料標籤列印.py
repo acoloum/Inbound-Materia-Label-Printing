@@ -37,7 +37,7 @@ CONFIG_PATH = os.path.join(_BASE, "settings.json")
 
 LABEL_W_MM  = 99.86
 LABEL_H_MM  = 59.3
-MARGIN_X_MM = 3.5
+MARGIN_X_MM = 2.5
 MARGIN_Y_MM = 2.5
 PRINT_DPI   = 203
 LABEL_W_PX  = int(LABEL_W_MM / 25.4 * PRINT_DPI)
@@ -488,8 +488,6 @@ def _print_labels_windows(printer_name, jobs_info):
             try:
                 dpi_x = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
                 dpi_y = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
-                offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
-                offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
                 target_w = int(LABEL_W_MM / 25.4 * dpi_x)
                 target_h = int(LABEL_H_MM / 25.4 * dpi_y)
 
@@ -502,10 +500,10 @@ def _print_labels_windows(printer_name, jobs_info):
                 try:
                     hdc.StartPage()
                     dib.draw(hdc.GetHandleOutput(), (
-                        offset_x,
-                        offset_y,
-                        offset_x + target_w,
-                        offset_y + target_h,
+                        0,
+                        0,
+                        target_w,
+                        target_h,
                     ))
                     hdc.EndPage()
                 finally:
