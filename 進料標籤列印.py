@@ -302,7 +302,7 @@ def make_label_image(record, pkg_no=1, pkg_total=1):
 
     font_lbl  = _load_font(FONT_BOLD_PATH, 36 * S)
     font_data = _load_font(FONT_BOLD_PATH, 36 * S)
-    font_bot  = _load_font(FONT_BOLD_PATH, 32 * S)
+    font_bot  = _load_font(FONT_BOLD_PATH, 36 * S)
 
     CX, CY = M, M
     CW, CH = W - 2*M, H - 2*M
@@ -620,7 +620,7 @@ def _draw_text_cell_pdf(c, x1, y1, x2, y2, text, font_pt, align="center"):
     c.saveState()
     c.setFillColorRGB(0, 0, 0)
     c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(font_pt * 0.025)  # 筆畫厚度隨字級微調
+    c.setLineWidth(font_pt * 0.035)  # 筆畫厚度隨字級微調
     t = c.beginText(tx * RL_MM, (LABEL_H_MM - baseline_top) * RL_MM)
     t.setFont(_RL_FONT_NAME, font_pt)
     t.setTextRenderMode(2)  # 2 = fill + stroke
@@ -642,7 +642,7 @@ def _draw_label_on_canvas(c, record, pkg_no, pkg_total):
     X_QR, X_END = M + CW - QR_W, M + CW
     QR_ROWS = 4
     FONT_DATA = 36 * 72 / PRINT_DPI
-    FONT_BOT  = 32 * 72 / PRINT_DPI
+    FONT_BOT  = 36 * 72 / PRINT_DPI
 
     def xpt(x_mm): return x_mm * RL_MM
     def ypt(y_top_mm): return (H - y_top_mm) * RL_MM
